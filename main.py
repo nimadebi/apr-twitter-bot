@@ -72,11 +72,10 @@ def toot():
         tempus_pool_start_time = tempus_pool_contract.functions.startTime().call()
         tempus_pool_maturity_time = tempus_pool_contract.functions.maturityTime().call()
         pool_duration_in_seconds = (tempus_pool_maturity_time - tempus_pool_start_time)
-
         scale_factor = (SECONDS_IN_A_DAY * DAYS_IN_A_YEAR) / pool_duration_in_seconds
-
         token_amount = tempus_pool_contract.functions.backingTokenONE().call()
         is_backing_token = True
+        
         if chain == "ETH":
             principals = stats_contract_ethereum.functions.estimatedDepositAndFix\
                 (tempus_amm_address, token_amount, is_backing_token).call()
@@ -92,8 +91,8 @@ def toot():
 
         ratio = principals / estimated_minted_shares
         pure_interest = ratio - 1
-
         apr = (pure_interest * scale_factor)*100
+        
         if chain == "ETH":
             txt_eth += pool_name + ": " + str(round(apr, 2)) + "%\n"
         else:
@@ -106,13 +105,10 @@ def toot():
 
     return
 
-
+  
 schedule.every().day.at("20:00").do(toot)
-#schedule.every(1).minutes.do(toot)
 
 while True:
     schedule.run_pending()
     time.sleep(60)
 
-
-#toot()
