@@ -1,6 +1,6 @@
 # apr-twitter-bot
 
-Tweets daily APR of some pools. Fetches deployed contracts from https://docs.tempus.finance/docs/deployed-contracts  
+Tweets daily APR of Tempus pools. Fetches deployed contracts from https://docs.tempus.finance/docs/deployed-contracts  
   
 Requirements can be found in requirements.txt.  
   
