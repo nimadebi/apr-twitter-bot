@@ -1,6 +1,9 @@
 from dotenv import load_dotenv
+from datetime import datetime
+from bs4 import BeautifulSoup
 from web3 import Web3
 import schedule
+import requests
 import tweepy
 import json
 import time
@@ -28,22 +31,60 @@ DAYS_IN_A_YEAR = 365
 web3_eth = Web3(Web3.HTTPProvider(infura_url))
 web3_ftm = Web3(Web3.HTTPProvider("https://rpc.ftm.tools/"))
 
-# [Chain, Pool name (starting with ticker), pool address, AMM address]
-# https://docs.tempus.finance/docs/deployed-contracts
-token_contract_addresses = [["ETH", "$ETH Lido Pool", "0x0697B0a2cBb1F947f51a9845b715E9eAb3f89B4F", "0x200e41BE620928351F98Da8031BAEB7BD401a129"],
-                            ["ETH", "$USDC Yearn Pool", "0x443297DE16C074fDeE19d2C9eCF40fdE2f5F62C2", "0x811f4F0241A9A4583C052c08BDA7F6339DBb13f7"],
-                            ["ETH", "$DAI Yearn Pool", "0x7e0fc07280f47bac3D55815954e0f904c86f642E", "0x7cA043143C6e30bDA28dDc7322d7951F538D75e8"],
-                            ["FTM", "$DAI Yearn Pool", "0x9c0273E4abB665ce156422a75F5a81db3c264A23", "0x354090dd4f695D7dc5ad492e48d0f30042Ed7BbE"],
-                            ["FTM", "$USDT Yearn Pool", "0xE9b557f9766Fb20651E3685374cd1DF6f977d36B", "0x54b28166026e8dd13bf07c46da6ef754a6b80989"],
-                            ["FTM", "$USDC Yearn Pool", "0x943B73d3B7373de3e5Dd68f64dbf85E6F4f56c9E", "0x8DCf7e47d7c285e11E48a78dFDDaEc5c48887AF8"],
-                            ["FTM", "$WETH Yearn Pool", "0xA9C549aeFa21ee6e79bEFCe91fa0E16a9C7d585a", "0x51B21368396cb76A348E995D698960F8fe44DeF1"],
-                            ["FTM", "$YFI Yearn Pool", "0xAE7E5242eb52e8a592605eE408268091cC8794b8", "0x4B137DD01a7Dc7c3Bc12d51b42a00030B6561340"]]
+def fetch_addresses():
+    """
+        https://docs.tempus.finance/docs/deployed-contracts
+
+        data-block-content = 4b73fba9d14642158569f01e4e46b4f3 = ethereum
+        data-block-content = a9c94bb382644c6dac4dcd369d0a8d25 = fantom
+
+        We're first fetching the table blocks (all rows) and then iterating through the columns.
+        Format addresses as: [Chain, Pool name (starting with ticker), pool address, AMM address]
+    """
+    page = requests.get("https://docs.tempus.finance/docs/deployed-contracts")
+    soup = BeautifulSoup(page._content, 'html.parser')
+
+    eth_table = soup.select('div[data-block-content="4b73fba9d14642158569f01e4e46b4f3"] '
+                            'div[data-rnw-int-class="table-row____"]')
+    ftm_table = soup.select('div[data-block-content="a9c94bb382644c6dac4dcd369d0a8d25"] '
+                            'div[data-rnw-int-class="table-row____"]')
+
+    addresses = get_data_from_table(eth_table, "ETH") + get_data_from_table(ftm_table, "FTM")
+
+    addresses = remove_matured_pools(addresses)
+
+    return addresses
+
+def get_data_from_table(table, chain):
+    data = []
+    for row in table:
+        column_data = []
+        column_data.append(chain)
+        for column in row:
+            column_data.append(column.text)
+
+        data.append(column_data)
+
+    return data
+
+def remove_matured_pools(addresses):
+    add = addresses
+    today = datetime.now().date()
+    for i in add:
+        parsed_date = i[1].split("(")[1].split(")")[0].replace("matures", "").strip()
+        maturity_date = datetime.strptime(parsed_date, "%d %B %Y").date()
+        if maturity_date < today:
+            add.remove(i)
+
+    return add
 
 with open("abi/TempusPool.json") as f:
     ABI_pool = json.load(f)
 
 with open("abi/Stats.json") as f:
     ABI_stats = json.load(f)
+
+token_contract_addresses = fetch_addresses()
 
 stats_address_ethereum = Web3.toChecksumAddress('0xe552369a1b109b1eeebf060fcb6618f70f9131f7')
 stats_contract_ethereum = web3_eth.eth.contract(stats_address_ethereum, abi=ABI_stats)
@@ -53,14 +94,14 @@ stats_contract_fantom = web3_ftm.eth.contract(stats_address_fantom, abi=ABI_stat
 
 def toot():
     txt_top = "Current fixed APR's on app.tempus.finance\n"
-    txt_eth = "\nEthereum: \n"
-    txt_ftm = "\nFantom: \n"
+    txt_eth = "\nEthereum Pools: \n"
+    txt_ftm = "\nFantom Pools: \n"
 
     tweet = ""
 
     for i in token_contract_addresses:
         chain = i[0]
-        pool_name = i[1]
+        pool_name = i[1].split('Pool')[0]  # Removing maturity date to shorten the pool name so it fits in one tweet.
         tempus_pool_address = Web3.toChecksumAddress(i[2])
         tempus_amm_address = Web3.toChecksumAddress(i[3])
 
@@ -72,10 +113,11 @@ def toot():
         tempus_pool_start_time = tempus_pool_contract.functions.startTime().call()
         tempus_pool_maturity_time = tempus_pool_contract.functions.maturityTime().call()
         pool_duration_in_seconds = (tempus_pool_maturity_time - tempus_pool_start_time)
+
         scale_factor = (SECONDS_IN_A_DAY * DAYS_IN_A_YEAR) / pool_duration_in_seconds
+
         token_amount = tempus_pool_contract.functions.backingTokenONE().call()
         is_backing_token = True
-        
         if chain == "ETH":
             principals = stats_contract_ethereum.functions.estimatedDepositAndFix\
                 (tempus_amm_address, token_amount, is_backing_token).call()
@@ -91,12 +133,12 @@ def toot():
 
         ratio = principals / estimated_minted_shares
         pure_interest = ratio - 1
+
         apr = (pure_interest * scale_factor)*100
-        
         if chain == "ETH":
-            txt_eth += pool_name + ": " + str(round(apr, 2)) + "%\n"
+            txt_eth += "$" + pool_name + ": " + str(round(apr, 2)) + "%\n"
         else:
-            txt_ftm += pool_name + ": " + str(round(apr, 2)) + "%\n"
+            txt_ftm += "$" + pool_name + ": " + str(round(apr, 2)) + "%\n"
 
     tweet += txt_top + txt_eth + txt_ftm
     print(tweet)
@@ -105,8 +147,9 @@ def toot():
 
     return
 
-  
+
 schedule.every().day.at("20:00").do(toot)
+#schedule.every(1).minutes.do(toot)
 
 while True:
     schedule.run_pending()
