@@ -8,7 +8,7 @@ Requirements can be found in requirements.txt.
 To initialize:
   
 - Generate all twitter api keys/secrets from https://developer.twitter.com/ on the account you want the tweets to be shown.  
-- Fill a .env file with the keys according to main.py.  
+- Fill a .env file with the keys/secrets according to main.py.  
 - Change the time at which the tweet should be sent at the bottom of main.py "schedule.every().day.at("20:00").do(toot)".
   
   
