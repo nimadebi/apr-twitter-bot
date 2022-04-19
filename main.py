@@ -11,7 +11,7 @@ import os
 
 load_dotenv()
 
-infura_url = os.getenv("INFURA")
+alchemy_url = os.getenv("ALCHEMY")
 bearer = os.getenv("BEARER")
 consumer_key = os.getenv("CONSUMER_KEY")
 consumer_secret = os.getenv("CONSUMER_SECRET")
@@ -28,7 +28,7 @@ client = tweepy.Client(bearer_token=bearer,
 SECONDS_IN_A_DAY = 86400
 DAYS_IN_A_YEAR = 365
 
-web3_eth = Web3(Web3.HTTPProvider(infura_url))
+web3_eth = Web3(Web3.HTTPProvider(alchemy_url))
 web3_ftm = Web3(Web3.HTTPProvider("https://rpc.ftm.tools/"))
 
 def fetch_addresses():
